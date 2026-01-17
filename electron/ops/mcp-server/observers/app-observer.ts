@@ -12,9 +12,10 @@ interface AppInfo {
 export class AppObserver {
   private intervalId: NodeJS.Timeout | null = null;
   private lastApp: string | null = null;
+  private lastAppName: string | null = null;
   private pollInterval: number = 1000; // 1 second
 
-  constructor(private onEvent: (type: string, payload: any) => void) {}
+  constructor(private onAppChange: (bundleId: string, appName: string) => void) {}
 
   start(): void {
     this.intervalId = setInterval(() => this.poll(), this.pollInterval);
@@ -33,12 +34,8 @@ export class AppObserver {
 
       if (currentApp && currentApp.bundle_id !== this.lastApp) {
         this.lastApp = currentApp.bundle_id;
-        this.onEvent('app_activated', {
-          source: {
-            app_bundle_id: currentApp.bundle_id,
-            app_name: currentApp.name,
-          },
-        });
+        this.lastAppName = currentApp.name;
+        this.onAppChange(currentApp.bundle_id, currentApp.name);
       }
     } catch (error) {
       // Silently ignore polling errors
@@ -69,7 +66,7 @@ export class AppObserver {
     if (!this.lastApp) return null;
     return {
       bundle_id: this.lastApp,
-      name: '',
+      name: this.lastAppName || '',
       is_frontmost: true,
     };
   }

@@ -107,7 +107,44 @@ contextBridge.exposeInMainWorld('electronAPI', {
   restartApp: () => ipcRenderer.invoke('restart-app'),
 });
 
+// Ops Layer API
+contextBridge.exposeInMainWorld('opsAPI', {
+  // Queries
+  getProposals: () => ipcRenderer.invoke('ops:get-proposals'),
+  getPlaybooks: () => ipcRenderer.invoke('ops:get-playbooks'),
 
+  // Commands
+  approveProposal: (id: string, editedContent?: string) =>
+    ipcRenderer.invoke('ops:approve-proposal', id, editedContent),
+  declineProposal: (id: string) =>
+    ipcRenderer.invoke('ops:decline-proposal', id),
+  startObservation: () => ipcRenderer.invoke('ops:start-observation'),
+  stopObservation: () => ipcRenderer.invoke('ops:stop-observation'),
+  setPrivateMode: (enabled: boolean) =>
+    ipcRenderer.invoke('ops:set-private-mode', enabled),
+
+  // Event subscriptions
+  onNewProposal: (callback: (proposal: any) => void) => {
+    const handler = (_event: any, proposal: any) => callback(proposal);
+    ipcRenderer.on('ops:new-proposal', handler);
+    return () => ipcRenderer.removeListener('ops:new-proposal', handler);
+  },
+  onPendingCountChanged: (callback: (count: number) => void) => {
+    const handler = (_event: any, count: number) => callback(count);
+    ipcRenderer.on('ops:pending-count', handler);
+    return () => ipcRenderer.removeListener('ops:pending-count', handler);
+  },
+  onExecutionComplete: (callback: (result: any) => void) => {
+    const handler = (_event: any, result: any) => callback(result);
+    ipcRenderer.on('ops:execution-complete', handler);
+    return () => ipcRenderer.removeListener('ops:execution-complete', handler);
+  },
+  onShowOpsInbox: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('show-ops-inbox', handler);
+    return () => ipcRenderer.removeListener('show-ops-inbox', handler);
+  },
+});
 
 // --------- Preload scripts loading ---------
 function domReady(condition: DocumentReadyState[] = ['complete', 'interactive']) {

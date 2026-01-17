@@ -7,9 +7,18 @@ import {
 import { v7 as uuidv7 } from 'uuid';
 import { AppObserver } from './observers/app-observer.js';
 import { WindowObserver } from './observers/window-observer.js';
+import type { ObservationEvent, ObservationEventType } from '../../../src/types/ops';
+
+export interface CurrentContext {
+  app_bundle_id: string;
+  app_name: string;
+  window_title: string;
+  window_id: number;
+  url?: string;
+}
 
 interface ObservationCallback {
-  (event: any): void;
+  (event: ObservationEvent): void;
 }
 
 export class ComputerMcpServer {
@@ -20,6 +29,12 @@ export class ComputerMcpServer {
   private isObserving: boolean = false;
   private isPrivateMode: boolean = false;
   private callbacks: ObservationCallback[] = [];
+  private currentContext: CurrentContext = {
+    app_bundle_id: '',
+    app_name: '',
+    window_title: '',
+    window_id: 0,
+  };
 
   constructor() {
     this.sessionId = uuidv7();
@@ -28,10 +43,35 @@ export class ComputerMcpServer {
       { capabilities: { tools: {} } }
     );
 
-    this.appObserver = new AppObserver(this.emitEvent.bind(this));
-    this.windowObserver = new WindowObserver(this.emitEvent.bind(this));
+    this.appObserver = new AppObserver(this.updateAppContext.bind(this));
+    this.windowObserver = new WindowObserver(this.updateWindowContext.bind(this));
 
     this.setupHandlers();
+  }
+
+  private updateAppContext(bundleId: string, appName: string): void {
+    const previousBundleId = this.currentContext.app_bundle_id;
+    this.currentContext.app_bundle_id = bundleId;
+    this.currentContext.app_name = appName;
+
+    // Emit app_activated event when app changes
+    if (previousBundleId !== bundleId) {
+      this.emitEvent('app_activated', {});
+    }
+  }
+
+  private updateWindowContext(title: string, windowId: number, url?: string): void {
+    const previousTitle = this.currentContext.window_title;
+    this.currentContext.window_title = title;
+    this.currentContext.window_id = windowId;
+    if (url !== undefined) {
+      this.currentContext.url = url;
+    }
+
+    // Emit window_focused event when window changes
+    if (previousTitle !== title) {
+      this.emitEvent('window_focused', {});
+    }
   }
 
   private setupHandlers(): void {
@@ -86,13 +126,20 @@ export class ComputerMcpServer {
     });
   }
 
-  private emitEvent(eventType: string, payload: any): void {
+  private emitEvent(eventType: ObservationEventType, payload: ObservationEvent['payload']): void {
     if (!this.isObserving || this.isPrivateMode) return;
 
-    const event = {
+    const event: ObservationEvent = {
       id: uuidv7(),
       timestamp: new Date().toISOString(),
       session_id: this.sessionId,
+      source: {
+        app_bundle_id: this.currentContext.app_bundle_id,
+        app_name: this.currentContext.app_name,
+        window_title: this.currentContext.window_title,
+        window_id: this.currentContext.window_id,
+        url: this.currentContext.url,
+      },
       event_type: eventType,
       payload,
       redaction_applied: [],
@@ -102,6 +149,23 @@ export class ComputerMcpServer {
     for (const callback of this.callbacks) {
       callback(event);
     }
+  }
+
+  /**
+   * Test helper method to emit events with custom context.
+   * Used for testing to verify event structure without relying on observers.
+   */
+  testEmitEvent(
+    eventType: ObservationEventType,
+    context: CurrentContext,
+    payload: ObservationEvent['payload']
+  ): void {
+    // Temporarily set the context and enable observing
+    const wasObserving = this.isObserving;
+    this.isObserving = true;
+    this.currentContext = { ...context };
+    this.emitEvent(eventType, payload);
+    this.isObserving = wasObserving;
   }
 
   private startObservation() {
@@ -119,22 +183,19 @@ export class ComputerMcpServer {
   }
 
   private getCurrentContext() {
-    const appContext = this.appObserver.getCurrentApp();
-    const windowContext = this.windowObserver.getCurrentWindow();
-
     return {
       content: [{
         type: 'text',
-        text: JSON.stringify({ app: appContext, window: windowContext }, null, 2),
+        text: JSON.stringify(this.currentContext, null, 2),
       }],
     };
   }
 
   private setPrivateMode(enabled: boolean) {
     this.isPrivateMode = enabled;
-    if (enabled) {
-      // In private mode, we don't emit events
-      this.sessionId = uuidv7(); // New session when exiting
+    if (!enabled) {
+      // When exiting private mode, start a fresh session
+      this.sessionId = uuidv7();
     }
     return {
       content: [{

@@ -1,11 +1,15 @@
-import { useState } from 'react';
-import { Inbox, Pause, Play, EyeOff, Settings } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Inbox, Pause, Play, EyeOff, Settings, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useOpsStore } from '@/store/opsStore';
 import { ProposalCard } from './ProposalCard';
 
-export function OpsInbox() {
+interface OpsInboxProps {
+  onClose?: () => void;
+}
+
+export function OpsInbox({ onClose }: OpsInboxProps) {
   const {
     proposals,
     pendingCount,
@@ -13,9 +17,15 @@ export function OpsInbox() {
     isPrivateMode,
     approveProposal,
     declineProposal,
-    setObserving,
+    startObservation,
+    stopObservation,
     togglePrivateMode,
+    initialize,
   } = useOpsStore();
+
+  useEffect(() => {
+    initialize();
+  }, [initialize]);
 
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
 
@@ -60,7 +70,7 @@ export function OpsInbox() {
           <Button
             size="icon"
             variant="ghost"
-            onClick={() => setObserving(!isObserving)}
+            onClick={() => isObserving ? stopObservation() : startObservation()}
             title={isObserving ? 'Pause Observation' : 'Resume Observation'}
           >
             {isObserving ? (
@@ -73,6 +83,12 @@ export function OpsInbox() {
           <Button size="icon" variant="ghost" title="Settings">
             <Settings className="h-4 w-4" />
           </Button>
+
+          {onClose && (
+            <Button size="icon" variant="ghost" onClick={onClose} title="Close">
+              <X className="h-4 w-4" />
+            </Button>
+          )}
         </div>
       </div>
 

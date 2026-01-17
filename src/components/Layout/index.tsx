@@ -12,10 +12,16 @@ import { useInstallationSetup } from "@/hooks/useInstallationSetup";
 import InstallationErrorDialog from "../InstallStep/InstallationErrorDialog/InstallationErrorDialog";
 import Halo from "../Halo";
 import useChatStoreAdapter from "@/hooks/useChatStoreAdapter";
+import { OpsInbox } from '@/components/OpsInbox';
+import { useOpsStore } from '@/store/opsStore';
+import { Inbox } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 const Layout = () => {
 	const { initState, isFirstLaunch, setIsFirstLaunch, setInitState } = useAuthStore();
 	const [noticeOpen, setNoticeOpen] = useState(false);
+	const [opsInboxOpen, setOpsInboxOpen] = useState(false);
+	const { pendingCount, initialize: initOps } = useOpsStore();
 
 	//Get Chatstore for the active project's task
 	const { chatStore } = useChatStoreAdapter();
@@ -37,6 +43,17 @@ const Layout = () => {
 	} = useInstallationUI();
 
 	useInstallationSetup();
+
+	useEffect(() => {
+		initOps();
+
+		// Listen for show-ops-inbox from tray
+		const cleanup = window.opsAPI?.onShowOpsInbox(() => {
+			setOpsInboxOpen(true);
+		});
+
+		return () => cleanup?.();
+	}, [initOps]);
 
 	useEffect(() => {
 		const handleBeforeClose = () => {
@@ -78,10 +95,34 @@ const Layout = () => {
 
 				{/* Main app content */}
 				{shouldShowMainContent && (
-					<>
-						<Outlet />
-						<HistorySidebar />
-					</>
+					<div className="flex h-full">
+						<div className="flex-1 min-w-0 relative">
+							<Outlet />
+							<HistorySidebar />
+
+							{/* Ops Inbox toggle button */}
+							<Button
+								size="icon"
+								variant="ghost"
+								onClick={() => setOpsInboxOpen(!opsInboxOpen)}
+								className="absolute top-2 right-2 z-40"
+								title="Ops Inbox"
+							>
+								<Inbox className="h-5 w-5" />
+								{pendingCount > 0 && (
+									<span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
+										{pendingCount > 9 ? '9+' : pendingCount}
+									</span>
+								)}
+							</Button>
+						</div>
+
+						{opsInboxOpen && (
+							<aside className="w-96 border-l bg-background flex-shrink-0">
+								<OpsInbox onClose={() => setOpsInboxOpen(false)} />
+							</aside>
+						)}
+					</div>
 				)}
 
 				{(backendError || (error && installationState === "error")) && (

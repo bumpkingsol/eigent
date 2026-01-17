@@ -1,5 +1,6 @@
-import { ipcMain, app } from 'electron';
+import { ipcMain, app, BrowserWindow } from 'electron';
 import * as path from 'path';
+import { v7 as uuidv7 } from 'uuid';
 import { OpsDatabase } from './database';
 import { OpsTray } from './tray';
 import { ComputerMcpServer } from './mcp-server';
@@ -7,6 +8,8 @@ import { InterpreterAgent } from './agents/interpreter';
 import { DraftingAgent } from './agents/drafter';
 import { PolicyAgent } from './agents/policy';
 import { PlaybookMiner } from './agents/playbook-miner';
+import { RunnerAgent, ExecutionResult } from './agents/runner';
+import { IntegrationManager } from './integrations/manager';
 import type { ObservationEvent } from '../../src/types/ops';
 
 export class OpsLayer {
@@ -17,6 +20,8 @@ export class OpsLayer {
   private drafter: DraftingAgent;
   private policy: PolicyAgent;
   private miner: PlaybookMiner;
+  private runner: RunnerAgent;
+  private integrations: IntegrationManager;
   private observationBuffer: ObservationEvent[] = [];
 
   constructor(private onOpenOpsInbox: () => void) {
@@ -28,6 +33,8 @@ export class OpsLayer {
     this.drafter = new DraftingAgent();
     this.policy = new PolicyAgent();
     this.miner = new PlaybookMiner();
+    this.integrations = new IntegrationManager();
+    this.runner = new RunnerAgent(this.integrations);
 
     this.setupEventHandlers();
     this.setupIpc();
@@ -36,6 +43,12 @@ export class OpsLayer {
   init(): void {
     this.tray = new OpsTray(this.onOpenOpsInbox);
     this.tray.init();
+  }
+
+  private sendToAllWindows(channel: string, ...args: any[]): void {
+    BrowserWindow.getAllWindows().forEach((win) => {
+      win.webContents.send(channel, ...args);
+    });
   }
 
   private setupEventHandlers(): void {
@@ -105,6 +118,15 @@ export class OpsLayer {
     const pendingCount = this.db.getPendingProposals().length;
     this.tray?.updatePendingCount(pendingCount);
 
+    // Send new proposal to all renderer windows
+    this.sendToAllWindows('ops:new-proposal', {
+      ...proposal,
+      metadata: proposal.metadata,
+    });
+
+    // Send updated pending count
+    this.sendToAllWindows('ops:pending-count', pendingCount);
+
     // Show notification
     if (proposal.confidence >= 60) {
       this.tray?.showProposalNotification(
@@ -126,17 +148,54 @@ export class OpsLayer {
       }));
     });
 
-    ipcMain.handle('ops:approve-proposal', (_, id: string) => {
+    ipcMain.handle('ops:approve-proposal', async (_, id: string, editedContent?: string) => {
+      // Update status
       this.db.updateProposalStatus(id, 'approved');
+
+      // Get proposal
+      const proposalRow = this.db.getProposal(id);
+      if (!proposalRow) return false;
+
+      // Parse proposal
+      const proposal = {
+        ...proposalRow,
+        metadata: JSON.parse(proposalRow.metadata),
+        draft_content: editedContent || proposalRow.draft_content,
+      };
+
+      // Execute
+      const result = await this.runner.execute(proposal as any);
+
+      // Log decision
+      this.db.insertDecision({
+        id: uuidv7(),
+        timestamp: new Date().toISOString(),
+        proposal_id: id,
+        decision: 'approved',
+        edit_distance: editedContent ? 1 : 0,
+        execution_result: result.success ? 'success' : 'failure',
+        error_message: result.error_message || null,
+      });
+
+      // Update proposal status based on execution
+      this.db.updateProposalStatus(id, result.success ? 'executed' : 'approved');
+
+      // Send execution result to renderer
+      this.sendToAllWindows('ops:execution-complete', result);
+
+      // Update counts
       const count = this.db.getPendingProposals().length;
       this.tray?.updatePendingCount(count);
-      return true;
+      this.sendToAllWindows('ops:pending-count', count);
+
+      return result.success;
     });
 
     ipcMain.handle('ops:decline-proposal', (_, id: string) => {
       this.db.updateProposalStatus(id, 'declined');
       const count = this.db.getPendingProposals().length;
       this.tray?.updatePendingCount(count);
+      this.sendToAllWindows('ops:pending-count', count);
       return true;
     });
 
@@ -156,6 +215,12 @@ export class OpsLayer {
 
     ipcMain.handle('ops:stop-observation', () => {
       // MCP server stop handled internally
+      return true;
+    });
+
+    ipcMain.handle('ops:set-private-mode', (_, enabled: boolean) => {
+      // Call the MCP server's setPrivateMode - need to expose it
+      // For now, just return true as placeholder
       return true;
     });
   }

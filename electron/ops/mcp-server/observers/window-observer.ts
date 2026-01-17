@@ -12,9 +12,10 @@ interface WindowInfo {
 export class WindowObserver {
   private intervalId: NodeJS.Timeout | null = null;
   private lastWindow: string | null = null;
+  private lastWindowId: number = 0;
   private pollInterval: number = 500; // 500ms
 
-  constructor(private onEvent: (type: string, payload: any) => void) {}
+  constructor(private onWindowChange: (title: string, windowId: number, url?: string) => void) {}
 
   start(): void {
     this.intervalId = setInterval(() => this.poll(), this.pollInterval);
@@ -33,13 +34,8 @@ export class WindowObserver {
 
       if (window && window.title !== this.lastWindow) {
         this.lastWindow = window.title;
-        this.onEvent('window_focused', {
-          source: {
-            window_title: window.title,
-            window_id: window.window_id,
-            app_name: window.app_name,
-          },
-        });
+        this.lastWindowId = window.window_id;
+        this.onWindowChange(window.title, window.window_id);
       }
     } catch (error) {
       // Silently ignore polling errors
@@ -70,6 +66,6 @@ export class WindowObserver {
   }
 
   getCurrentWindow(): WindowInfo | null {
-    return this.lastWindow ? { title: this.lastWindow, window_id: 0, app_name: '' } : null;
+    return this.lastWindow ? { title: this.lastWindow, window_id: this.lastWindowId, app_name: '' } : null;
   }
 }

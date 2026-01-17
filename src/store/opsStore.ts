@@ -1,5 +1,4 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 import type { ProposedAction, Playbook } from '../types/ops';
 
 interface NotificationSettings {
@@ -15,113 +14,156 @@ interface OpsStore {
   isObserving: boolean;
   isPrivateMode: boolean;
   notifications: NotificationSettings;
+  initialized: boolean;
 
-  // Actions - Proposals
-  addProposal: (proposal: ProposedAction) => void;
-  approveProposal: (id: string) => void;
-  declineProposal: (id: string) => void;
-  updateProposalDraft: (id: string, draft: string) => void;
-  clearProposals: () => void;
-
-  // Actions - Playbooks
-  addPlaybook: (playbook: Playbook) => void;
-  updatePlaybook: (id: string, updates: Partial<Playbook>) => void;
-  deletePlaybook: (id: string) => void;
-
-  // Actions - Observation
-  setObserving: (observing: boolean) => void;
-  togglePrivateMode: () => void;
-
-  // Actions - Notifications
+  // Actions
+  initialize: () => Promise<void>;
+  cleanup: () => void;
+  refreshProposals: () => Promise<void>;
+  approveProposal: (id: string, editedContent?: string) => Promise<void>;
+  declineProposal: (id: string) => Promise<void>;
+  startObservation: () => Promise<void>;
+  stopObservation: () => Promise<void>;
+  togglePrivateMode: () => Promise<void>;
   setNotifications: (settings: Partial<NotificationSettings>) => void;
+
+  // Internal
+  _addProposal: (proposal: ProposedAction) => void;
+  _setPendingCount: (count: number) => void;
+  _cleanupFunctions: (() => void)[];
 }
 
-const useOpsStore = create<OpsStore>()(
-  persist(
-    (set) => ({
-      // Initial state
-      proposals: [],
-      playbooks: [],
-      pendingCount: 0,
-      isObserving: false,
-      isPrivateMode: false,
-      notifications: { enabled: true, sound: false },
+const useOpsStore = create<OpsStore>()((set, get) => ({
+  // Initial state
+  proposals: [],
+  playbooks: [],
+  pendingCount: 0,
+  isObserving: false,
+  isPrivateMode: false,
+  notifications: { enabled: true, sound: false },
+  initialized: false,
+  _cleanupFunctions: [],
 
-      // Proposal actions
-      addProposal: (proposal) => set((state) => ({
-        proposals: [proposal, ...state.proposals],
-        pendingCount: state.pendingCount + 1,
-      })),
+  initialize: async () => {
+    if (get().initialized || !window.opsAPI) return;
 
-      approveProposal: (id) => set((state) => {
-        const proposal = state.proposals.find(p => p.id === id);
-        const wasPending = proposal?.status === 'pending';
-        return {
-          proposals: state.proposals.map((p) =>
-            p.id === id ? { ...p, status: 'approved' as const } : p
-          ),
-          pendingCount: wasPending ? Math.max(0, state.pendingCount - 1) : state.pendingCount,
-        };
-      }),
+    try {
+      // Load initial data
+      const proposals = await window.opsAPI.getProposals();
+      const playbooks = await window.opsAPI.getPlaybooks();
+      const pendingCount = proposals.filter((p) => p.status === 'pending').length;
 
-      declineProposal: (id) => set((state) => {
-        const proposal = state.proposals.find(p => p.id === id);
-        const wasPending = proposal?.status === 'pending';
-        return {
-          proposals: state.proposals.map((p) =>
-            p.id === id ? { ...p, status: 'declined' as const } : p
-          ),
-          pendingCount: wasPending ? Math.max(0, state.pendingCount - 1) : state.pendingCount,
-        };
-      }),
+      // Subscribe to events and store cleanup functions
+      const cleanupNewProposal = window.opsAPI.onNewProposal((proposal) => {
+        get()._addProposal(proposal);
+      });
 
-      updateProposalDraft: (id, draft) => set((state) => ({
-        proposals: state.proposals.map((p) =>
-          p.id === id ? { ...p, draft_content: draft } : p
-        ),
-      })),
+      const cleanupPendingCount = window.opsAPI.onPendingCountChanged((count) => {
+        get()._setPendingCount(count);
+      });
 
-      clearProposals: () => set({ proposals: [], pendingCount: 0 }),
-
-      // Playbook actions
-      addPlaybook: (playbook) => set((state) => ({
-        playbooks: [...state.playbooks, playbook],
-      })),
-
-      updatePlaybook: (id, updates) => set((state) => ({
-        playbooks: state.playbooks.map((p) =>
-          p.id === id ? { ...p, ...updates, updated_at: new Date().toISOString() } : p
-        ),
-      })),
-
-      deletePlaybook: (id) => set((state) => ({
-        playbooks: state.playbooks.filter((p) => p.id !== id),
-      })),
-
-      // Observation actions
-      setObserving: (observing) => set({ isObserving: observing }),
-
-      togglePrivateMode: () => set((state) => ({
-        isPrivateMode: !state.isPrivateMode,
-      })),
-
-      // Notification actions
-      setNotifications: (settings) => set((state) => ({
-        notifications: { ...state.notifications, ...settings },
-      })),
-    }),
-    {
-      name: 'ops-storage',
-      partialize: (state) => ({
-        playbooks: state.playbooks,
-        notifications: state.notifications,
-      }),
+      set({
+        proposals,
+        playbooks,
+        pendingCount,
+        initialized: true,
+        _cleanupFunctions: [cleanupNewProposal, cleanupPendingCount],
+      });
+    } catch (error) {
+      console.error('[opsStore] Failed to initialize:', error);
     }
-  )
-);
+  },
 
-// Export hook version for components
+  cleanup: () => {
+    get()._cleanupFunctions.forEach((fn) => fn?.());
+    set({ initialized: false, _cleanupFunctions: [] });
+  },
+
+  refreshProposals: async () => {
+    if (!window.opsAPI) return;
+    try {
+      const proposals = await window.opsAPI.getProposals();
+      set({
+        proposals,
+        pendingCount: proposals.filter((p) => p.status === 'pending').length,
+      });
+    } catch (error) {
+      console.error('[opsStore] Failed to refresh proposals:', error);
+    }
+  },
+
+  approveProposal: async (id, editedContent) => {
+    if (!window.opsAPI) return;
+    try {
+      await window.opsAPI.approveProposal(id, editedContent);
+      set((state) => ({
+        proposals: state.proposals.map((p) =>
+          p.id === id ? { ...p, status: 'approved' as const } : p
+        ),
+      }));
+    } catch (error) {
+      console.error('[opsStore] Failed to approve proposal:', error);
+    }
+  },
+
+  declineProposal: async (id) => {
+    if (!window.opsAPI) return;
+    try {
+      await window.opsAPI.declineProposal(id);
+      set((state) => ({
+        proposals: state.proposals.map((p) =>
+          p.id === id ? { ...p, status: 'declined' as const } : p
+        ),
+      }));
+    } catch (error) {
+      console.error('[opsStore] Failed to decline proposal:', error);
+    }
+  },
+
+  startObservation: async () => {
+    if (!window.opsAPI) return;
+    try {
+      await window.opsAPI.startObservation();
+      set({ isObserving: true });
+    } catch (error) {
+      console.error('[opsStore] Failed to start observation:', error);
+    }
+  },
+
+  stopObservation: async () => {
+    if (!window.opsAPI) return;
+    try {
+      await window.opsAPI.stopObservation();
+      set({ isObserving: false });
+    } catch (error) {
+      console.error('[opsStore] Failed to stop observation:', error);
+    }
+  },
+
+  togglePrivateMode: async () => {
+    if (!window.opsAPI) return;
+    const newMode = !get().isPrivateMode;
+    try {
+      await window.opsAPI.setPrivateMode(newMode);
+      set({ isPrivateMode: newMode });
+    } catch (error) {
+      console.error('[opsStore] Failed to toggle private mode:', error);
+    }
+  },
+
+  setNotifications: (settings) =>
+    set((state) => ({
+      notifications: { ...state.notifications, ...settings },
+    })),
+
+  _addProposal: (proposal) =>
+    set((state) => ({
+      proposals: [proposal, ...state.proposals],
+      // Don't increment pendingCount here - rely on _setPendingCount from IPC
+    })),
+
+  _setPendingCount: (count) => set({ pendingCount: count }),
+}));
+
 export { useOpsStore };
-
-// Export non-hook version for non-components
 export const getOpsStore = () => useOpsStore.getState();
