@@ -4,6 +4,15 @@ from typing import Optional, Callable, Any, List
 
 @dataclass
 class ReflectionResult:
+    """Result of a reflection loop.
+
+    Attributes:
+        approved (bool): Whether the result was approved by the agent.
+        retry_count (int): Number of retries performed.
+        final_result (Any): The final result after potential improvements.
+        feedback_history (List[str]): History of feedback received from the agent.
+    """
+
     approved: bool
     retry_count: int
     final_result: Any
@@ -27,7 +36,18 @@ If it needs improvement, start your response with "NEEDS_IMPROVEMENT:" followed 
 
 
 class ReflectionLoop:
+    """Manages a reflection loop where an agent evaluates and improves a result.
+
+    The loop continues until the agent approves the result or the maximum number
+    of retries is reached.
+    """
+
     def __init__(self, max_retries: int = 3):
+        """Initialize the ReflectionLoop.
+
+        Args:
+            max_retries (int): Maximum number of times to retry improvement. Defaults to 3.
+        """
         self.max_retries = max_retries
 
     def reflect(
@@ -35,25 +55,31 @@ class ReflectionLoop:
         agent: Any,
         task: str,
         result: Any,
-        execute_fn: Optional[Callable] = None,
+        execute_fn: Optional[Callable[[str], Any]] = None,
     ) -> ReflectionResult:
+        """Execute the reflection loop.
+
+        Args:
+            agent (Any): The agent instance to evaluate the result.
+            task (str): The task description.
+            result (Any): The initial result to evaluate.
+            execute_fn (Optional[Callable[[str], Any]]): Function to execute if improvement is needed.
+                Takes the feedback string as input and returns a new result.
+
+        Returns:
+            ReflectionResult: The outcome of the reflection process.
+        """
         current_result = result
         feedback_history = []
 
         for retry in range(self.max_retries + 1):
             prompt = REFLECTION_PROMPT.format(task=task, result=current_result)
             response = agent.step(prompt)
-            # Handle potential different response structures from the agent
+
+            # Extract feedback handling different response structures
+            feedback = ""
             if hasattr(response, "msgs") and response.msgs:
                 feedback = response.msgs[0].content
-            else:
-                # Fallback if structure is different, though tests assume msgs[0].content
-                # Based on existing codebase patterns, agent.step returns a ChatMessage structure
-                feedback = ""
-
-            # The test mocks it as response.msgs[0].content so I'll stick to that
-            # but I should make sure my implementation matches the mock exactly first.
-            feedback = response.msgs[0].content if response.msgs else ""
 
             if "NEEDS_IMPROVEMENT:" not in feedback:
                 return ReflectionResult(
@@ -65,7 +91,17 @@ class ReflectionLoop:
 
             feedback_history.append(feedback)
 
-            if execute_fn and retry < self.max_retries:
+            # If we have no way to improve the result (no execute_fn), we should stop immediately
+            # after the first rejection rather than retrying futilely.
+            if not execute_fn:
+                return ReflectionResult(
+                    approved=False,
+                    retry_count=retry,
+                    final_result=current_result,
+                    feedback_history=feedback_history,
+                )
+
+            if retry < self.max_retries:
                 current_result = execute_fn(feedback)
 
         return ReflectionResult(
