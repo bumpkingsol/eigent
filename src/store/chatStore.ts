@@ -1795,6 +1795,19 @@ const chatStore = (initial?: Partial<ChatStore>) => createStore<ChatStore>()(
 						return
 
 					}
+
+					if (agentMessages.step === "reasoning_step") {
+						const { thought, step_number } = agentMessages.data;
+						const currentTask = getCurrentChatStore().tasks[getCurrentTaskId()];
+
+						if (currentTask) {
+							const updatedCotList = [...(currentTask.cotList || [])];
+							updatedCotList.push(`Step ${step_number}: ${thought}`);
+							setCotList(getCurrentTaskId(), updatedCotList);
+						}
+						return;
+					}
+
 					if (["sync"].includes(agentMessages.step)) return
 					if (agentMessages.step === "ask") {
 						if (tasks[currentTaskId].activeAsk != '') {

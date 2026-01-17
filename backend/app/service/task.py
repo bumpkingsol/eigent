@@ -40,6 +40,7 @@ class Action(str, Enum):
     supplement = "supplement"  # user -> backend
     pause = "pause"  # user -> backend  user take control
     resume = "resume"  # user -> backend  user take control
+    reasoning_step = "reasoning_step"  # backend -> user (streaming CoT)
     new_agent = "new_agent"  # user -> backend
     budget_not_enough = "budget_not_enough"  # backend -> user
     add_task = "add_task"  # user -> backend
@@ -324,13 +325,18 @@ class TaskLock:
 
     def add_background_task(self, task: asyncio.Task) -> None:
         r"""Add a task to track and clean up weak references"""
-        logger.debug("Adding background task", extra={"task_id": self.id, "background_tasks_count": len(self.background_tasks)})
+        logger.debug(
+            "Adding background task", extra={"task_id": self.id, "background_tasks_count": len(self.background_tasks)}
+        )
         self.background_tasks.add(task)
         task.add_done_callback(lambda t: self.background_tasks.discard(t))
 
     async def cleanup(self):
         r"""Cancel all background tasks and clean up resources"""
-        logger.info("Starting task lock cleanup", extra={"task_id": self.id, "background_tasks_count": len(self.background_tasks)})
+        logger.info(
+            "Starting task lock cleanup",
+            extra={"task_id": self.id, "background_tasks_count": len(self.background_tasks)},
+        )
         for task in list(self.background_tasks):
             if not task.done():
                 task.cancel()
@@ -343,12 +349,10 @@ class TaskLock:
 
     def add_conversation(self, role: str, content: str | dict):
         """Add a conversation entry to history"""
-        logger.debug("Adding conversation entry", extra={"task_id": self.id, "role": role, "content_length": len(str(content))})
-        self.conversation_history.append({
-            'role': role,
-            'content': content,
-            'timestamp': datetime.now().isoformat()
-        })
+        logger.debug(
+            "Adding conversation entry", extra={"task_id": self.id, "role": role, "content_length": len(str(content))}
+        )
+        self.conversation_history.append({"role": role, "content": content, "timestamp": datetime.now().isoformat()})
 
     def get_recent_context(self, max_entries: int = None) -> str:
         """Get recent conversation context as a formatted string"""

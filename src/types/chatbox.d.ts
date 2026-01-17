@@ -127,6 +127,9 @@ declare global {
 			current_length?: number;
 			max_length?: number;
 			text?: string;
+			// CoT
+			thought?: string;
+			step_number?: number;
 		};
 		status?: 'running' | 'filled' | 'completed';
 	}
