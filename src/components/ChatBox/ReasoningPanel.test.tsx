@@ -51,4 +51,9 @@ describe('ReasoningPanel', () => {
     render(<ReasoningPanel thoughts={thoughts} agentName="Coder" />);
     expect(screen.getByText("Coder's reasoning")).toBeInTheDocument();
   });
+
+  it('respects defaultExpanded prop', async () => {
+    render(<ReasoningPanel thoughts={thoughts} defaultExpanded={true} />);
+    expect(await screen.findByText('Analyzing request')).toBeInTheDocument();
+  });
 });

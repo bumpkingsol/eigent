@@ -183,6 +183,11 @@ class ActionTakeControl(BaseModel):
     action: Literal[Action.pause, Action.resume]
 
 
+class ActionReasoningStepData(BaseModel):
+    action: Literal[Action.reasoning_step] = Action.reasoning_step
+    data: dict[Literal["thought", "step_number", "agent_name"], str | int]
+
+
 class ActionNewAgent(BaseModel):
     action: Literal[Action.new_agent] = Action.new_agent
     name: str
@@ -243,6 +248,7 @@ ActionData = (
     | ActionSkipTaskData
     | ActionDecomposeTextData
     | ActionDecomposeProgressData
+    | ActionReasoningStepData
 )
 
 

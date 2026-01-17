@@ -5,11 +5,11 @@ import { useState } from "react";
 interface ReasoningPanelProps {
   thoughts: string[];
   agentName?: string;
-  isExpanded?: boolean;
+  defaultExpanded?: boolean;
 }
 
-export function ReasoningPanel({ thoughts, agentName, isExpanded: initialExpanded = false }: ReasoningPanelProps) {
-  const [isExpanded, setIsExpanded] = useState(initialExpanded);
+export function ReasoningPanel({ thoughts, agentName, defaultExpanded = false }: ReasoningPanelProps) {
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded);
 
   if (thoughts.length === 0) return null;
 
@@ -17,6 +17,7 @@ export function ReasoningPanel({ thoughts, agentName, isExpanded: initialExpande
     <div className="border border-border/50 rounded-lg bg-muted/30 overflow-hidden">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
         className="w-full px-3 py-2 flex items-center justify-between text-sm text-muted-foreground hover:bg-muted/50"
       >
         <div className="flex items-center gap-2">
