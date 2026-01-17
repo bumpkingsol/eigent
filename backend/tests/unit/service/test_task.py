@@ -1,5 +1,14 @@
 import asyncio
 import weakref
+import sys
+import os
+from pathlib import Path
+
+# Add project root to sys.path to allow importing 'utils'
+project_root = str(Path(__file__).parents[4])
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
 from datetime import datetime, timedelta
 from unittest.mock import patch
 import pytest
