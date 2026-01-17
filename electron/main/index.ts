@@ -40,6 +40,8 @@ import {
   getInstallationStatus,
 } from './install-deps';
 import { isBinaryExists, getBackendPath, getVenvPath } from './utils/process';
+import { OpsTray } from '../ops/tray';
+import { OpsLayer } from '../ops';
 
 const userData = app.getPath('userData');
 
@@ -63,6 +65,12 @@ let browser_port = 9222;
 // Protocol URL queue for handling URLs before window is ready
 let protocolUrlQueue: string[] = [];
 let isWindowReady = false;
+
+// Ops tray manager
+let opsTray: OpsTray | null = null;
+
+// Ops layer manager
+let opsLayer: OpsLayer | null = null;
 
 // ==================== path config ====================
 const preload = path.join(__dirname, '../preload/index.mjs');
@@ -720,6 +728,15 @@ function registerIpcHandlers() {
     } else {
       win?.maximize();
     }
+  });
+
+  // ==================== ops tray IPC handlers ====================
+  ipcMain.on('ops-pending-count', (_, count: number) => {
+    opsTray?.updatePendingCount(count);
+  });
+
+  ipcMain.on('ops-show-notification', (_, { title, body, proposalId }: { title: string; body: string; proposalId: string }) => {
+    opsTray?.showProposalNotification(title, body, proposalId);
   });
 
   // ==================== file operation handler ====================
@@ -1880,6 +1897,26 @@ app.whenReady().then(async () => {
     '[PROTOCOL] Registered localfile protocol on both default and main_window sessions'
   );
 
+  // ==================== initialize Ops Layer ====================
+  opsLayer = new OpsLayer(() => {
+    // Focus main window and show Ops Inbox
+    if (win) {
+      win.show();
+      win.webContents.send('show-ops-inbox');
+    }
+  });
+  opsLayer.init();
+
+  // Legacy tray manager (kept for backwards compatibility with existing IPC handlers)
+  opsTray = new OpsTray(() => {
+    // Focus main window and show Ops Inbox
+    if (win) {
+      win.show();
+      win.webContents.send('show-ops-inbox');
+    }
+  });
+  opsTray.init();
+
   // ==================== initialize app ====================
   initializeApp();
   registerIpcHandlers();
@@ -1932,6 +1969,16 @@ app.on('before-quit', async (event) => {
     // No need to sync between different profile directories
 
     // Clean up resources
+    if (opsLayer) {
+      opsLayer.destroy();
+      opsLayer = null;
+    }
+
+    if (opsTray) {
+      opsTray.destroy();
+      opsTray = null;
+    }
+
     if (webViewManager) {
       webViewManager.destroy();
       webViewManager = null;
